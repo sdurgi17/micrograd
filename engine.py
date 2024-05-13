@@ -25,18 +25,6 @@ class Value:
         out._backward = _backward
         return out
 
-    def __radd__(self, other) -> "Value":
-        return self + other
-
-    def __neg__(self):  # -self
-        return self * -1
-
-    def __sub__(self, other):  # self - other
-        return self + (-other)
-
-    def __truediv__(self, other):  # self / other
-        return self * other**-1
-
     def __mul__(self, other) -> "Value":
         other = Value(other) if not isinstance(other, Value) else other
         out = Value(self.val * other.val, [self, other], "*")
@@ -48,17 +36,40 @@ class Value:
         out._backward = _backward
         return out
 
+    def __pow__(self, other):
+        assert isinstance(other, (int, float)), "only supporting int/float powers for now"
+        out = Value(self.val**other, (self,), f"**{other}")
+
+        def _backward():
+            self.grad += other * (self.val ** (other - 1)) * out.grad
+
+        out._backward = _backward
+        return out
+
     def __rmul__(self, other) -> "Value":
         return self.__mul__(other)
 
-    def __pow__(self, other):
-        other = Value(other) if not isinstance(other, Value) else other
-        out = Value(self.val**other.val, [self], "pow")
+    def __truediv__(self, other):  # self / other
+        return self * other**-1
+
+    def __neg__(self):  # -self
+        return self * -1
+
+    def __sub__(self, other):  # self - other
+        return self + (-other)
+
+    def __radd__(self, other) -> "Value":
+        return self + other
+
+    def exp(self):
+        x = self.data
+        out = Value(math.exp(x), (self,), "exp")
 
         def _backward():
-            self.grad += other.val * self.val ** (other.val - 1) * out.grad
+            self.grad += out.data * out.grad  # NOTE: in the video I incorrectly used = instead of +=. Fixed here.
 
         out._backward = _backward
+
         return out
 
     def tanh(self):
@@ -76,17 +87,19 @@ class Value:
     def backward(self):
         self.grad = 1.0
         topo_sorted = []
+        visited = set()
 
         def topo(node, results):
-            if node._op is not None:
+            if node not in visited:
+                visited.add(node)
                 for child in node._child_nodes:
                     topo(child, results)
-            results.append(node)
+                results.append(node)
 
         topo(self, topo_sorted)
         for node in reversed(topo_sorted):
             node._backward()
-            x = 1
+            print(f"grad : {node.grad}, val: {node.val}, op: {node._op}")
 
 
 def relu(x):
@@ -99,7 +112,7 @@ class Neuron:
         self.bias = Value(random.uniform(-1, 1))
 
     def __call__(self, x) -> Any:
-        act = sum([w * x for w, x in zip(self.weights, x)]) + self.bias
+        act = sum([w * x for w, x in zip(self.weights, x)], self.bias)
         return act.tanh()
 
     def parameters(self):
@@ -141,28 +154,27 @@ if __name__ == "__main__":
     ]
     ys = [1.0, -1.0, -1.0, 1.0]  # desired targets
 
-    mlp = MLP(3, [3, 5, 4, 1])
-
+    random.seed(123)
+    mlp = MLP(3, [3, 4, 4, 1])
+    print(mlp(xs[0]))
+    print(mlp.parameters())
     losses = []
     for i in range(1000):
         yp = [mlp(x)[0] for x in xs]
         loss = sum([(yh - y) ** 2 for y, yh in zip(ys, yp)])
-        print(loss)
         losses.append(loss.val)
         for p in mlp.parameters():
             p.grad = 0.0
 
         loss.backward()
+        print(i, loss.val)
 
         for p in mlp.parameters():
-            p.val -= 0.1 * p.grad
+            p.val += -0.1 * p.grad
 
+    print(losses)
     import matplotlib.pyplot as plt
 
     plt.plot(losses)
     yp = [mlp(x)[0].val for x in xs]
     print(yp)
-
-
-def is_even(num: int):
-    return num % 2 == 0
